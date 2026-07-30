@@ -58,6 +58,7 @@ let package = Package(
             dependencies: [
                 "LiveKit",
                 "LiveKitTestSupport",
+                .product(name: "LiveKitUniFFI", package: "LiveKitUniFFI"),
             ],
         ),
         .testTarget(
