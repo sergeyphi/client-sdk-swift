@@ -355,6 +355,54 @@ extension Transport {
             return try await set(localDescription: original, munging: Array(munges.dropLast()))
         }
     }
+
+    /// Sets `munged` as the remote description (with `offerId` validation), falling back to
+    /// `original` when libwebrtc rejects it. Mirrors ``set(mungedLocalDescription:fallingBackTo:)``
+    /// for the remote side — used when munging the SFU's answer (see
+    /// ``mungeH264StartBitrate(_:kbps:)``), where a rejected munge should not sacrifice the
+    /// publish itself.
+    func set(remoteDescription munged: LKRTCSessionDescription,
+             offerId: UInt32,
+             fallingBackTo original: LKRTCSessionDescription) async throws
+    {
+        do {
+            try await set(remoteDescription: munged, offerId: offerId)
+        } catch {
+            log("Munged remote description was rejected, falling back to the original: \(error)", .warning)
+            try await set(remoteDescription: original, offerId: offerId)
+        }
+    }
+
+    /// Appends `x-google-start-bitrate=<kbps>` to every H.264 `a=fmtp` line in `sdp`'s video
+    /// sections.
+    ///
+    /// WebRTC's send-side bandwidth estimator always starts a new send stream at its own
+    /// hardcoded default (~300 kbps) and ramps up from there, regardless of the publish
+    /// preset's `VideoEncoding.maxBitrate` ceiling — and no ObjC API on this platform exposes a
+    /// way to override that starting point directly (there is no `RTCRtpSender` /
+    /// `RTCPeerConnectionFactory` equivalent of a `BitrateSettings` initial value). This is
+    /// libwebrtc's own SDP-level hook for it instead: `x-google-start-bitrate` is read out of
+    /// the negotiated H.264 codec's fmtp parameters when the send encoder is configured.
+    ///
+    /// The offerer's send parameters are negotiated against the **answer**, not the offer it
+    /// sent — so this is meant to be munged into the SFU's answer, before it becomes the
+    /// publisher transport's remote description (see `LiveKitSDK.videoPublishStartBitrateKbps`
+    /// and its call site in `Room+SignalClientDelegate`), not into the outgoing offer.
+    ///
+    /// A hint, not a guarantee: if the network can't sustain it, the bandwidth estimator
+    /// corrects downward within about a second, same as any other overshoot.
+    nonisolated static func mungeH264StartBitrate(_ sdp: String, kbps: Int) -> String {
+        var document = SDP(parsing: sdp)
+        let parameter = "x-google-start-bitrate=\(kbps)"
+        for index in document.mediaSections.indices {
+            let section = document.mediaSections[index]
+            guard section.mediaType == "video" else { continue }
+            for rtpmap in section.rtpmaps where rtpmap.codec.caseInsensitiveCompare("H264") == .orderedSame {
+                document.mediaSections[index].appendFmtpParameter(parameter, forPayload: rtpmap.payload)
+            }
+        }
+        return document.write()
+    }
 }
 
 // MARK: - Stats

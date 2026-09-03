@@ -39,6 +39,7 @@ public class LiveKitSDK: NSObject, Loggable {
     fileprivate struct State {
         var logger: any Logger = OSLogger()
         var tracing: any Tracing = LoggingTracer()
+        var videoPublishStartBitrateKbps: Int?
     }
 
     fileprivate static let state = StateSync(State())
@@ -86,6 +87,28 @@ public class LiveKitSDK: NSObject, Loggable {
         // TODO: Add RTC related initializations
         DeviceManager.prepare()
     }
+
+    /// Sets the bitrate WebRTC's send-side bandwidth estimator should start a published H.264
+    /// video track at, via `x-google-start-bitrate` munged into the SFU's SDP answer.
+    ///
+    /// WebRTC always starts a new send stream at its own hardcoded ~300 kbps default and ramps
+    /// up from there, regardless of the publish preset's bitrate ceiling — costing several
+    /// seconds of low-bitrate, high-QP video before it climbs to a usable rate. No ObjC API on
+    /// this platform exposes a way to override that starting point directly; this is libwebrtc's
+    /// own SDP-level hook for it (see `Transport.mungeH264StartBitrate(_:kbps:)`).
+    ///
+    /// A hint, not a guarantee: the bandwidth estimator still corrects downward within about a
+    /// second if the network can't actually sustain it.
+    ///
+    /// - Note: Applies to every H.264 video track published after this call, not per-track.
+    ///   Pass `nil` to stop munging and fall back to WebRTC's own default.
+    public static func set(videoPublishStartBitrateKbps kbps: Int?) {
+        state.mutate { $0.videoPublishStartBitrateKbps = kbps }
+    }
+
+    /// Current value set via ``set(videoPublishStartBitrateKbps:)``. Consulted by
+    /// `Room+SignalClientDelegate` when munging the publisher's answer SDP.
+    static var videoPublishStartBitrateKbps: Int? { state.read { $0.videoPublishStartBitrateKbps } }
 }
 
 // Lazily initialized to the first logger

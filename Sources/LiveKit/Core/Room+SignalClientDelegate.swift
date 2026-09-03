@@ -356,6 +356,16 @@ extension Room: SignalClientDelegate {
 
         do {
             let publisher = try requirePublisher()
+
+            if let kbps = LiveKitSDK.videoPublishStartBitrateKbps {
+                let mungedSDP = Transport.mungeH264StartBitrate(answer.sdp, kbps: kbps)
+                if mungedSDP != answer.sdp {
+                    let munged = RTC.createSessionDescription(type: answer.type, sdp: mungedSDP)
+                    try await publisher.set(remoteDescription: munged, offerId: offerId, fallingBackTo: answer)
+                    return
+                }
+            }
+
             try await publisher.set(remoteDescription: answer, offerId: offerId)
         } catch {
             log("Failed to set remote description with offerId: \(offerId), error: \(error)", .error)
